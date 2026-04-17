@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "slug": "playwright-github-actions",
-  "step": "deps_written",
-  "completed_specs": ["snippet-1", "snippet-2", "snippet-3", "snippet-4", "snippet-5", "snippet-6", "snippet-7"],
-  "pending_specs": [],
-  "created_at": "2026-04-17T00:00:00Z",
-  "updated_at": "2026-04-17T00:00:02Z"
-}
