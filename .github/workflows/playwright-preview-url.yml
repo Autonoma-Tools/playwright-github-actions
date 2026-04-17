@@ -1,0 +1,129 @@
+# Level 3: Run Playwright against a Vercel preview deployment URL.
+#
+# What this does:
+#   1. Listens for the `deployment_status` event that Vercel fires when a
+#      preview finishes deploying.
+#   2. Filters to successful Preview deployments only.
+#   3. Extracts the preview URL from github.event.deployment_status.target_url.
+#   4. Runs Playwright against that URL.
+#   5. Posts a comment on the associated PR with the pass/fail summary and a
+#      link to the full HTML report artifact.
+#
+# Required secrets: none (GITHUB_TOKEN is provided automatically).
+#
+# Concurrency: keyed on the deployment ref so that multiple commits on the
+# same PR cancel older runs instead of racing each other.
+name: Playwright (preview URL)
+
+on:
+  deployment_status:
+
+concurrency:
+  group: playwright-preview-${{ github.event.deployment.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.event.deployment_status.state == 'success' && github.event.deployment_status.environment == 'Preview'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.run-tests.outcome }}
+      preview-url: ${{ steps.preview.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+
+      - name: Extract preview URL
+        id: preview
+        run: |
+          url="${{ github.event.deployment_status.target_url }}"
+          if [ -z "$url" ]; then
+            echo "No target_url on deployment_status event" >&2
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Preview URL: $url"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run Playwright tests
+        id: run-tests
+        run: npx playwright test
+        env:
+          CI: 'true'
+          BASE_URL: ${{ steps.preview.outputs.url }}
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-preview
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Comment on PR with result
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const previewUrl = '${{ steps.preview.outputs.url }}';
+            const outcome = '${{ steps.run-tests.outcome }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Find the PR associated with this deployment via the ref (branch name).
+            const ref = context.payload.deployment.ref;
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${ref}`,
+              state: 'open',
+            });
+
+            if (prs.data.length === 0) {
+              core.info(`No open PR found for ref ${ref}; skipping comment.`);
+              return;
+            }
+
+            const prNumber = prs.data[0].number;
+            const icon = outcome === 'success' ? 'PASS' : 'FAIL';
+            const body = [
+              `### Playwright (preview): ${icon}`,
+              '',
+              `- Preview URL: ${previewUrl}`,
+              `- Outcome: \`${outcome}\``,
+              `- [View run & download report](${runUrl})`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });

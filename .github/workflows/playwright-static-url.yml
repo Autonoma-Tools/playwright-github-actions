@@ -1,0 +1,76 @@
+# Level 2: Run Playwright against a stable staging URL.
+#
+# What this does:
+#   1. Checks out the repo so tests/ and playwright.config.js are available.
+#   2. Installs Node + dependencies.
+#   3. Restores / caches Playwright browser binaries.
+#   4. Runs Playwright against the URL stored in the STAGING_URL secret.
+#   5. Optionally injects an Authorization header via PLAYWRIGHT_EXTRA_HTTP_HEADERS
+#      (read by playwright.config.js) so you can hit a protected staging env.
+#
+# Required secrets:
+#   STAGING_URL          Full base URL, e.g. https://staging.example.com
+#   STAGING_AUTH_TOKEN   (optional) bearer token if your staging requires auth.
+#                        Set in: Settings -> Secrets and variables -> Actions.
+name: Playwright (static staging URL)
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Build auth header (if token provided)
+        id: auth
+        run: |
+          if [ -n "${{ secrets.STAGING_AUTH_TOKEN }}" ]; then
+            echo 'headers={"Authorization":"Bearer ${{ secrets.STAGING_AUTH_TOKEN }}"}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'headers=' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Playwright tests
+        run: npx playwright test
+        env:
+          CI: 'true'
+          BASE_URL: ${{ secrets.STAGING_URL }}
+          PLAYWRIGHT_EXTRA_HTTP_HEADERS: ${{ steps.auth.outputs.headers }}
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-static-url
+          path: playwright-report/
+          retention-days: 14

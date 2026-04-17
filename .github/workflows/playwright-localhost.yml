@@ -1,0 +1,74 @@
+# Level 1: Run Playwright against a localhost dev server started inside the runner.
+#
+# What this does:
+#   1. Installs Node + project dependencies (npm ci).
+#   2. Restores / caches Playwright browser binaries at ~/.cache/ms-playwright.
+#   3. Starts `npm run dev` as a background process.
+#   4. Waits for http://localhost:3000 to be reachable.
+#   5. Runs Playwright tests against that URL.
+#   6. Uploads the HTML report as an artifact so you can download it from the
+#      run summary even when tests pass.
+#
+# Required secrets: none.
+name: Playwright (localhost)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Start dev server
+        run: npm run dev &
+        env:
+          CI: 'true'
+
+      - name: Wait for dev server
+        run: npx wait-on http://localhost:3000 --timeout 120000
+
+      - name: Run Playwright tests
+        run: npx playwright test
+        env:
+          CI: 'true'
+          BASE_URL: http://localhost:3000
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-localhost
+          path: playwright-report/
+          retention-days: 14

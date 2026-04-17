@@ -1,0 +1,19 @@
+{
+  "name": "playwright-github-actions",
+  "version": "0.1.0",
+  "description": "Companion code for the Autonoma blog post on running Playwright in GitHub Actions with preview environment support.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:report": "playwright show-report",
+    "wait-for-deployment": "node scripts/wait-for-deployment.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "wait-on": "^7.2.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

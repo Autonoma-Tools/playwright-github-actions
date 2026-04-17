@@ -1,0 +1,30 @@
+# Autonoma test runner — managed E2E test execution against Vercel previews.
+#
+# This is the Autonoma equivalent of the Level 3 workflow. Instead of wiring
+# Playwright, caching, retries, and PR comments yourself, the
+# autonoma-ai/actions/test-runner action handles everything and streams
+# results back to the PR.
+#
+# Required secrets:
+#   AUTONOMA_API_KEY   Your Autonoma project API key.
+#                      Get it from: https://getautonoma.com/dashboard
+#                      Add it in:   Settings -> Secrets and variables -> Actions
+name: Autonoma E2E (preview)
+
+on:
+  deployment_status:
+
+jobs:
+  test:
+    if: github.event.deployment_status.state == 'success' && github.event.deployment_status.environment == 'Preview'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Autonoma test suite
+        uses: autonoma-ai/actions/test-runner@v1
+        with:
+          api-key: ${{ secrets.AUTONOMA_API_KEY }}
+          preview-url: ${{ github.event.deployment_status.target_url }}
+          platform: vercel
